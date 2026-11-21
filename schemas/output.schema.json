@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/calendar-agent/output.schema.json",
+  "title": "Calendar Agent Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "result_status", "proposed_events", "issues", "questions", "calendar_actions"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "request_id": {"type": "string"},
+    "result_status": {"type": "string", "enum": ["ready", "needs_user_input", "no_action", "error"]},
+    "proposed_events": {"type": "array", "items": {"$ref": "#/$defs/proposedEvent"}},
+    "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+    "questions": {"type": "array", "items": {"$ref": "#/$defs/question"}},
+    "calendar_actions": {"type": "array", "items": {"$ref": "#/$defs/calendarAction"}},
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["llm_status", "llm_model", "warnings"],
+      "properties": {
+        "llm_status": {"type": "string", "enum": ["disabled", "ok", "unavailable", "skipped_no_pairs"]},
+        "llm_model": {"type": "string"},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {"code": {"type": "string"}, "message": {"type": "string"}}
+    }
+  },
+  "$defs": {
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "address": {"type": "string"},
+        "place_id": {"type": "string"},
+        "latitude": {"type": "number"},
+        "longitude": {"type": "number"},
+        "online_url": {"type": "string", "format": "uri"}
+      }
+    },
+    "proposedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "title", "status"],
+      "properties": {
+        "event_id": {"type": "string"},
+        "title": {"type": "string"},
+        "status": {"type": "string", "enum": ["scheduled", "needs_confirmation", "duplicate_suspected", "unscheduled"]},
+        "date": {"type": "string", "format": "date"},
+        "start": {"type": "string", "format": "date-time"},
+        "end": {"type": "string", "format": "date-time"},
+        "location": {"$ref": "#/$defs/location"},
+        "reason": {"type": "string"},
+        "travel_before_minutes": {"type": "integer", "minimum": 0},
+        "travel_after_minutes": {"type": "integer", "minimum": 0},
+        "source_refs": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_id", "type", "severity", "event_ids", "message"],
+      "properties": {
+        "issue_id": {"type": "string"},
+        "type": {"type": "string", "enum": ["time_conflict", "travel_time", "possible_duplicate", "missing_information", "no_available_slot", "calendar_error"]},
+        "severity": {"type": "string", "enum": ["info", "warning", "blocking"]},
+        "event_ids": {"type": "array", "items": {"type": "string"}},
+        "calendar_event_ids": {"type": "array", "items": {"type": "string"}},
+        "message": {"type": "string"}
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_id", "type", "event_ids", "prompt", "blocking"],
+      "properties": {
+        "question_id": {"type": "string"},
+        "type": {"type": "string", "enum": ["choose_time", "confirm_duplicate", "resolve_conflict", "confirm_details", "choose_travel_mode"]},
+        "event_ids": {"type": "array", "items": {"type": "string"}},
+        "prompt": {"type": "string"},
+        "choices": {"type": "array", "items": {"type": "string"}},
+        "blocking": {"type": "boolean"}
+      }
+    },
+    "calendarAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "type", "event_id", "approval_required", "idempotency_key"],
+      "properties": {
+        "action_id": {"type": "string"},
+        "type": {"type": "string", "enum": ["create", "update", "skip"]},
+        "event_id": {"type": "string"},
+        "calendar_event_id": {"type": "string"},
+        "approval_required": {"type": "boolean"},
+        "idempotency_key": {"type": "string"}
+      }
+    }
+  }
+}

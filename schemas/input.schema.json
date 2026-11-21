@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/calendar-agent/input.schema.json",
+  "title": "Calendar Agent Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "user", "sources", "event_candidates", "calendar_context"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "request_id": {"type": "string", "minLength": 1},
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timezone"],
+      "properties": {
+        "timezone": {"type": "string", "description": "IANA timezone, e.g. Asia/Seoul"},
+        "home_location": {"$ref": "#/$defs/location"},
+        "travel_mode": {"type": "string", "enum": ["driving", "transit", "walking", "cycling", "unknown"]},
+        "minimum_buffer_minutes": {"type": "integer", "minimum": 0, "default": 10}
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "event_candidates": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/eventCandidate"}
+    },
+    "calendar_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["range_start", "range_end", "events"],
+      "properties": {
+        "range_start": {"type": "string", "format": "date-time"},
+        "range_end": {"type": "string", "format": "date-time"},
+        "events": {"type": "array", "items": {"$ref": "#/$defs/calendarEvent"}},
+        "travel_estimates": {
+          "type": "array",
+          "description": "Optional route estimates supplied by a travel-time adapter; each estimate is directional.",
+          "items": {"$ref": "#/$defs/travelEstimate"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "address": {"type": "string"},
+        "place_id": {"type": "string"},
+        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+        "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+        "online_url": {"type": "string", "format": "uri"}
+      },
+      "anyOf": [
+        {"required": ["name"]},
+        {"required": ["address"]},
+        {"required": ["place_id"]},
+        {"required": ["latitude", "longitude"]},
+        {"required": ["online_url"]}
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "platform", "reference", "captured_at"],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "platform": {"type": "string", "enum": ["notion", "email", "kakao_talk", "manual", "other"]},
+        "reference": {"type": "string", "description": "Message, email, or page identifier; avoid putting sensitive raw content here."},
+        "captured_at": {"type": "string", "format": "date-time"},
+        "sender": {"type": "string"},
+        "subject": {"type": "string"},
+        "raw_text": {"type": "string", "description": "Optional original email or Notion text for Inbox preview."},
+        "url": {"type": "string", "format": "uri"}
+      }
+    },
+    "eventCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "title", "type", "people", "organization", "time", "location", "content", "user_confirmation_status", "event_confirmation_status", "source_refs"],
+      "properties": {
+        "event_id": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "type": {"type": "string", "enum": ["meeting", "personal_appointment", "business_meeting", "other"]},
+        "people": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": {"type": "string"},
+              "affiliation": {"type": ["string", "null"]}
+            }
+          }
+        },
+        "organization": {"type": ["string", "null"], "description": "Organization or group this event belongs to."},
+        "content": {"type": ["string", "null"], "description": "Additional notes only; do not repeat title, people, or time."},
+        "source_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "time": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["date", "start", "end", "timezone"],
+          "properties": {
+            "date": {"type": ["string", "null"], "format": "date", "description": "Local calendar date when known; null if unknown."},
+            "start": {"type": ["string", "null"], "format": "date-time", "description": "Exact scheduled start time; null if not set."},
+            "end": {"type": ["string", "null"], "format": "date-time", "description": "Exact scheduled end time; null if not set."},
+            "timezone": {"type": "string"}
+          }
+        },
+        "location": {"anyOf": [{"$ref": "#/$defs/location"}, {"type": "null"}]},
+        "user_confirmation_status": {"type": "string", "enum": ["pending", "confirmed", "rejected"]},
+        "event_confirmation_status": {"type": "string", "enum": ["confirmed", "tentative", "cancelled", "unknown"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "Optional event-extraction confidence from 0 to 1."},
+        "preparation_minutes": {"type": "integer", "minimum": 0, "description": "Optional preparation time before the event."}
+      }
+    },
+    "calendarEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "title", "start", "end"],
+      "properties": {
+        "event_id": {"type": "string"},
+        "title": {"type": "string"},
+        "start": {"type": "string", "format": "date-time"},
+        "end": {"type": "string", "format": "date-time"},
+        "location": {"$ref": "#/$defs/location"},
+        "attendees": {"type": "array", "items": {"type": "string"}},
+        "source": {"type": "string", "enum": ["google_calendar", "other"]}
+      }
+    },
+    "travelEstimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_event_id", "to_event_id", "minutes", "mode"],
+      "properties": {
+        "from_event_id": {"type": "string"},
+        "to_event_id": {"type": "string"},
+        "minutes": {"type": "integer", "minimum": 0},
+        "mode": {"type": "string", "enum": ["driving", "transit", "walking", "cycling", "unknown"]}
+      }
+    }
+  }
+}
