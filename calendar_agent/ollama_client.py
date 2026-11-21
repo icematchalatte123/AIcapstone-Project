@@ -33,6 +33,28 @@ DUPLICATE_RESPONSE_SCHEMA: dict[str, Any] = {
     "required": ["pairs"],
 }
 
+EVENT_FLOW_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "flows": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title", "event_ids", "summary", "confidence"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "event_ids": {"type": "array", "items": {"type": "string"}},
+                    "summary": {"type": "string"},
+                    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                },
+            },
+        }
+    },
+    "required": ["flows"],
+}
+
 
 class OllamaError(RuntimeError):
     """Raised when Ollama cannot return a valid structured response."""
@@ -93,6 +115,63 @@ class OllamaClient:
             raise OllamaError(f"Ollama returned HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError) as exc:
             raise OllamaError(f"Could not get a schedule summary from Ollama: {exc}") from exc
+
+    def analyze_event_flows(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Find evidence-based links and chronological flows across calendar events."""
+        if len(events) < 2:
+            return []
+        payload = {
+            "model": self.model,
+            "stream": False,
+            "think": False,
+            "format": EVENT_FLOW_RESPONSE_SCHEMA,
+            "options": {"temperature": 0},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "당신은 일정 데이터에서 프로젝트와 후속 업무의 흐름을 찾는 분석가입니다. "
+                        "입력된 제목, 조직, 참석자, 내용, 연결 원문만 근거로 실제 연관이 있는 일정들을 묶으세요. "
+                        "킥오프 뒤 실무 미팅이나 진행 점검처럼 명시된 후속 관계, 검진 뒤 치료처럼 앞 일정의 결과에 "
+                        "따라 이어지는 관계를 찾으세요. 날짜나 참석자만 같다는 이유로 묶지 마세요. "
+                        "관계가 불분명하면 흐름에 포함하지 마세요. 각 흐름에는 실제 입력 event_id만 넣고 시간 순서로 배열하세요. "
+                        "흐름은 두 일정 이상일 때만 반환하고, 제목은 프로젝트나 공통 목적을 짧게 설명하세요. "
+                        "요약은 관계의 근거와 선후 관계를 간결하게 설명하세요."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({"events": events}, ensure_ascii=False),
+                },
+            ],
+        }
+        request = urllib.request.Request(
+            f"{self.base_url}/api/chat",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            message = body.get("message", {})
+            content = message.get("content", "")
+            if not isinstance(content, str) or not content.strip():
+                raise OllamaError("Ollama returned an empty event-flow analysis.")
+            result = json.loads(content)
+            if not isinstance(result, dict):
+                raise OllamaError("Ollama event-flow response must be a JSON object.")
+            flows = result.get("flows")
+            if not isinstance(flows, list):
+                raise OllamaError("Ollama response did not contain a 'flows' array.")
+            return [flow for flow in flows if isinstance(flow, dict)]
+        except OllamaError:
+            raise
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise OllamaError(f"Ollama returned HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise OllamaError(f"Could not analyze event flows with Ollama: {exc}") from exc
 
     def classify_duplicate_pairs(self, pairs: list[dict[str, Any]]) -> list[dict[str, str]]:
         if not pairs:

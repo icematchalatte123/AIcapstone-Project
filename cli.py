@@ -150,6 +150,80 @@ def _summarize_day(store: JsonStore, model: str, ollama_url: str) -> None:
     print(f"\n=== {day} AI 일정 요약 ===\n{summary}")
 
 
+def _analyze_event_flows(store: JsonStore, model: str, ollama_url: str) -> None:
+    events = [event for event in store.events() if event.get("workflow_status") == "confirmed"]
+    if len(events) < 2:
+        print("연계 분석을 하려면 내부 캘린더에 확정 일정이 2개 이상 있어야 합니다.")
+        return
+
+    sources = {source["source_id"]: source for source in store.sources()}
+    payload = []
+    for event in events:
+        linked_sources = [sources[ref] for ref in event.get("source_refs", []) if ref in sources]
+        payload.append({
+            "event_id": event["event_id"],
+            "title": event.get("title"),
+            "type": event.get("type"),
+            "time": event.get("time"),
+            "organization": event.get("organization"),
+            "people": event.get("people", []),
+            "location": event.get("location"),
+            "content": event.get("content"),
+            "source_notes": [
+                {"subject": source.get("subject"), "raw_text": source.get("raw_text")}
+                for source in linked_sources
+            ],
+        })
+
+    print("\n[연계 일정·프로젝트 흐름 분석 중...]")
+    try:
+        flows = OllamaClient(model=model, base_url=ollama_url).analyze_event_flows(payload)
+    except OllamaError as exc:
+        print(f"AI 연계 분석을 만들지 못했습니다: {exc}")
+        print("Ollama가 실행 중인지, 선택한 모델이 설치되어 있는지 확인하세요.")
+        return
+
+    event_map = {event["event_id"]: event for event in events}
+    linked_ids: set[str] = set()
+    displayed = 0
+    print("\n=== AI가 찾은 일정 흐름 ===")
+    for flow in flows:
+        raw_ids = flow.get("event_ids", [])
+        if not isinstance(raw_ids, list):
+            continue
+        flow_ids = list(dict.fromkeys(
+            event_id for event_id in raw_ids
+            if isinstance(event_id, str) and event_id in event_map
+        ))
+        if len(flow_ids) < 2:
+            continue
+        displayed += 1
+        linked_ids.update(flow_ids)
+        confidence = flow.get("confidence", "low")
+        title = flow.get("title") or "연계 일정"
+        print(f"\n{displayed}. {title} | 신뢰도: {confidence}")
+        for event_id in flow_ids:
+            event = event_map[event_id]
+            time_data = event.get("time", {})
+            start = time_data.get("start") or ""
+            end = time_data.get("end") or ""
+            day = start[:10] or time_data.get("date") or "날짜 미정"
+            start_text = start[11:16] if len(start) >= 16 else "시간 미정"
+            end_text = end[11:16] if len(end) >= 16 else ""
+            time_text = f"{start_text}–{end_text}" if end_text else start_text
+            print(f"  {day} {time_text} | [{event_id}] {event['title']}")
+        print(f"  분석 근거: {flow.get('summary') or '제공된 일정 정보에서 연계 근거를 찾았습니다.'}")
+
+    if not displayed:
+        print("입력된 정보만으로 연결 관계가 분명한 일정 흐름을 찾지 못했습니다.")
+    else:
+        unrelated = [event for event in events if event["event_id"] not in linked_ids]
+        if unrelated:
+            print("\n=== 다른 일정 ===")
+            for event in sorted(unrelated, key=lambda item: (item.get("time", {}).get("start") or "", item.get("title", ""))):
+                print(f"  [{event['event_id']}] {event['title']}")
+
+
 def _ai_review_list(store: JsonStore) -> None:
     events = [event for event in store.events() if event.get("workflow_status") != "ignored"]
     sources = {source["source_id"]: source for source in store.sources()}
@@ -604,6 +678,7 @@ def _menu(store: JsonStore, model: str, ollama_url: str) -> int:
         print("7. 일정 후보 무시 처리")
         print("8. 저장된 일정 중복 검사")
         print("9. 날짜별 AI 일정 요약")
+        print("10. 연계 일정·프로젝트 흐름 AI 분석")
         print("0. 종료")
         choice = input("선택: ").strip()
         try:
@@ -633,6 +708,8 @@ def _menu(store: JsonStore, model: str, ollama_url: str) -> int:
                 _standalone_duplicate_check(store, model, ollama_url)
             elif choice == "9":
                 _summarize_day(store, model, ollama_url)
+            elif choice == "10":
+                _analyze_event_flows(store, model, ollama_url)
             else:
                 print("메뉴 번호를 선택하세요.")
         except (OSError, json.JSONDecodeError, ValueError, KeyError) as exc:
